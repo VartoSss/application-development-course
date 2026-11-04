@@ -1,0 +1,1174 @@
+{
+  "openapi" : "3.0.3",
+  "info" : {
+    "description" : "API бронирования переговорок в офисе.\n\nКто вызывает метод, сервер узнаёт из JWT. Имя и идентификатор пользователя\nв параметрах и в теле не передаются.\n\n401 — пользователя установить не удалось (нет токена, токен повреждён или просрочен).\n403 — пользователь известен, но это действие ему запрещено.\n\nНаружу выходят только публичные DTO из `components.schemas`.\nСписок комнаты, карточка комнаты, строка календаря и бронь — разные схемы.\n\nБронь занимает полуинтервал `[startsAt, endsAt)`: стык встык конфликтом не считается.\n",
+    "title" : "Бронирование переговорок",
+    "version" : "1.0.0"
+  },
+  "servers" : [ {
+    "url" : "/api/v1"
+  } ],
+  "security" : [ {
+    "bearerAuth" : [ ]
+  } ],
+  "tags" : [ {
+    "description" : "Переговорки и их календарь",
+    "name" : "rooms"
+  }, {
+    "description" : "Бронирования",
+    "name" : "bookings"
+  } ],
+  "paths" : {
+    "/rooms" : {
+      "get" : {
+        "description" : "Возвращает публичные карточки комнат. Без фильтров — все комнаты.\nПустой результат — это `200` и пустой массив, а не `404`.\n",
+        "operationId" : "listRooms",
+        "parameters" : [ {
+          "description" : "Точный этаж. Подвал допустим.",
+          "explode" : true,
+          "in" : "query",
+          "name" : "floor",
+          "required" : false,
+          "schema" : {
+            "example" : 5,
+            "maximum" : 100,
+            "minimum" : -2,
+            "type" : "integer"
+          },
+          "style" : "form"
+        }, {
+          "description" : "Минимально нужная вместимость. В ответ попадут комнаты,\nу которых `capacity` не меньше этого значения.\n",
+          "explode" : true,
+          "in" : "query",
+          "name" : "capacity",
+          "required" : false,
+          "schema" : {
+            "example" : 6,
+            "maximum" : 500,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "style" : "form"
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "example" : [ {
+                  "id" : "6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90",
+                  "name" : "Орбита",
+                  "floor" : 5,
+                  "capacity" : 8,
+                  "amenities" : {
+                    "tv" : true,
+                    "whiteboard" : true,
+                    "videoConference" : true
+                  }
+                }, {
+                  "id" : "1c2d3e4f-5a6b-4789-8abc-def012345678",
+                  "name" : "Тихая",
+                  "floor" : 5,
+                  "capacity" : 4,
+                  "amenities" : {
+                    "tv" : false,
+                    "whiteboard" : true,
+                    "videoConference" : false
+                  }
+                } ],
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/Room"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "Список переговорок."
+          },
+          "400" : {
+            "content" : {
+              "application/json" : {
+                "examples" : {
+                  "floor" : {
+                    "summary" : "Плохой этаж",
+                    "value" : {
+                      "code" : "invalid_floor",
+                      "message" : "Этаж должен быть целым числом от -2 до 100"
+                    }
+                  },
+                  "capacity" : {
+                    "summary" : "Плохая вместимость",
+                    "value" : {
+                      "code" : "invalid_capacity",
+                      "message" : "Вместимость должна быть целым числом от 1 до 500"
+                    }
+                  }
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Фильтр некорректный: `floor` или `capacity` не целое число\nлибо выходит за допустимый диапазон. У `capacity` ещё и минимум 1.\n"
+          },
+          "401" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "unauthenticated",
+                  "message" : "Нужна авторизация"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Пользователя установить не удалось: заголовок Authorization отсутствует,\nсхема не Bearer, JWT повреждён или срок токена истёк.\n"
+          }
+        },
+        "summary" : "Получить список переговорок",
+        "tags" : [ "rooms" ]
+      }
+    },
+    "/rooms/{roomId}" : {
+      "get" : {
+        "description" : "Карточка одной комнаты. Поля списка здесь те же, плюс сведения, нужные чтобы дойти и выбрать время.",
+        "operationId" : "getRoom",
+        "parameters" : [ {
+          "description" : "Идентификатор переговорки.",
+          "explode" : false,
+          "in" : "path",
+          "name" : "roomId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "style" : "simple"
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "id" : "6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90",
+                  "name" : "Орбита",
+                  "floor" : 5,
+                  "capacity" : 8,
+                  "amenities" : {
+                    "tv" : true,
+                    "whiteboard" : true,
+                    "videoConference" : true
+                  },
+                  "description" : "Угловая комната с окнами во двор и большим столом.",
+                  "directions" : "5 этаж, левое крыло, третья дверь за ресепшен.",
+                  "photos" : [ {
+                    "url" : "https://cdn.example.com/rooms/orbita.jpg",
+                    "caption" : "Общий вид"
+                  } ],
+                  "workingHours" : [ {
+                    "weekday" : "monday",
+                    "opensAt" : "09:00",
+                    "closesAt" : "19:00"
+                  } ],
+                  "timeZone" : "Europe/Yekaterinburg"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/RoomDetails"
+                }
+              }
+            },
+            "description" : "Карточка переговорки."
+          },
+          "401" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "unauthenticated",
+                  "message" : "Нужна авторизация"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Пользователя установить не удалось: заголовок Authorization отсутствует,\nсхема не Bearer, JWT повреждён или срок токена истёк.\n"
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "room_not_found",
+                  "message" : "Переговорка не найдена"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Переговорки с таким id нет."
+          }
+        },
+        "summary" : "Получить переговорку",
+        "tags" : [ "rooms" ]
+      }
+    },
+    "/rooms/{roomId}/calendar" : {
+      "get" : {
+        "description" : "Брони одной комнаты внутри запрошенного окна.\nОкно включительно по `from` и исключительно по `to`.\nКомментарии броней в календарь не входят.\n",
+        "operationId" : "getRoomCalendar",
+        "parameters" : [ {
+          "description" : "Идентификатор переговорки.",
+          "explode" : false,
+          "in" : "path",
+          "name" : "roomId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "style" : "simple"
+        }, {
+          "description" : "Начало окна просмотра, включительно.",
+          "explode" : true,
+          "in" : "query",
+          "name" : "from",
+          "required" : true,
+          "schema" : {
+            "example" : "2026-11-10T00:00:00+05:00",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "style" : "form"
+        }, {
+          "description" : "Конец окна просмотра, исключительно. Должен быть позже `from`, окно не длиннее 90 суток.",
+          "explode" : true,
+          "in" : "query",
+          "name" : "to",
+          "required" : true,
+          "schema" : {
+            "example" : "2026-11-17T00:00:00+05:00",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "style" : "form"
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "roomId" : "6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90",
+                  "from" : "2026-11-10T00:00:00+05:00",
+                  "to" : "2026-11-17T00:00:00+05:00",
+                  "bookings" : [ {
+                    "id" : "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                    "startsAt" : "2026-11-10T10:00:00+05:00",
+                    "endsAt" : "2026-11-10T11:30:00+05:00",
+                    "title" : "Планёрка команды",
+                    "bookedBy" : "Анна Смирнова"
+                  } ]
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/RoomCalendar"
+                }
+              }
+            },
+            "description" : "Окно календаря и брони внутри него. Броней может не быть."
+          },
+          "400" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "invalid_interval",
+                  "message" : "Конец окна должен быть позже начала, а само окно не длиннее 90 суток"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Окно задано неверно: нет `from` или `to`, это не дата-время,\n`to` не позже `from`, либо окно длиннее 90 суток.\n"
+          },
+          "401" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "unauthenticated",
+                  "message" : "Нужна авторизация"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Пользователя установить не удалось: заголовок Authorization отсутствует,\nсхема не Bearer, JWT повреждён или срок токена истёк.\n"
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "room_not_found",
+                  "message" : "Переговорка не найдена"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Переговорки с таким id нет."
+          }
+        },
+        "summary" : "Получить календарь переговорки",
+        "tags" : [ "rooms" ]
+      }
+    },
+    "/rooms/{roomId}/bookings" : {
+      "post" : {
+        "description" : "Создаёт бронь. Кто бронирует, берётся из JWT и возвращается в `bookedBy`.\n`403`, если комната есть, но этому пользователю её бронировать нельзя.\nНесуществующая комната — `404`, а не `403`.\n",
+        "operationId" : "createBooking",
+        "parameters" : [ {
+          "description" : "Идентификатор переговорки.",
+          "explode" : false,
+          "in" : "path",
+          "name" : "roomId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "style" : "simple"
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "example" : {
+                "startsAt" : "2026-11-10T10:00:00+05:00",
+                "endsAt" : "2026-11-10T11:30:00+05:00",
+                "title" : "Планёрка команды",
+                "comment" : "Нужен переходник HDMI"
+              },
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateBooking"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "id" : "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                  "roomId" : "6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90",
+                  "startsAt" : "2026-11-10T10:00:00+05:00",
+                  "endsAt" : "2026-11-10T11:30:00+05:00",
+                  "title" : "Планёрка команды",
+                  "comment" : "Нужен переходник HDMI",
+                  "bookedBy" : "Анна Смирнова"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Booking"
+                }
+              }
+            },
+            "description" : "Бронь создана. В теле — её id и публичное представление.",
+            "headers" : {
+              "Location" : {
+                "description" : "URL созданной брони, `/api/v1/bookings/{bookingId}`.",
+                "explode" : false,
+                "schema" : {
+                  "example" : "/api/v1/bookings/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                  "type" : "string"
+                },
+                "style" : "simple"
+              }
+            }
+          },
+          "400" : {
+            "content" : {
+              "application/json" : {
+                "examples" : {
+                  "interval" : {
+                    "summary" : "Неверный интервал",
+                    "value" : {
+                      "code" : "invalid_interval",
+                      "message" : "Время окончания должно быть позже начала и попадать в часы работы комнаты"
+                    }
+                  },
+                  "title" : {
+                    "summary" : "Пустое имя брони",
+                    "value" : {
+                      "code" : "invalid_booking",
+                      "message" : "Укажите имя бронирования"
+                    }
+                  }
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Тело некорректно: конец не позже начала, длительность больше 12 часов,\nинтервал вне часов работы комнаты, пустое имя или слишком длинный комментарий.\n"
+          },
+          "401" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "unauthenticated",
+                  "message" : "Нужна авторизация"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Пользователя установить не удалось: заголовок Authorization отсутствует,\nсхема не Bearer, JWT повреждён или срок токена истёк.\n"
+          },
+          "403" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "forbidden",
+                  "message" : "Бронировать эту переговорку нельзя"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Пользователь известен, но бронировать эту переговорку ему нельзя."
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "room_not_found",
+                  "message" : "Переговорка не найдена"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Переговорки с таким id нет."
+          },
+          "409" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "booking_conflict",
+                  "message" : "Это время уже занято"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Интервал пересекается с другой бронью этой переговорки. Стык встык допустим."
+          }
+        },
+        "summary" : "Забронировать переговорку",
+        "tags" : [ "bookings" ]
+      }
+    },
+    "/bookings/{bookingId}" : {
+      "delete" : {
+        "description" : "Удаляет бронь. Повторный запрос с тем же id вернёт `404`.\n`403`, если бронь есть, но этому пользователю её удалять нельзя.\n",
+        "operationId" : "deleteBooking",
+        "parameters" : [ {
+          "description" : "Идентификатор бронирования.",
+          "explode" : false,
+          "in" : "path",
+          "name" : "bookingId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "style" : "simple"
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "id" : "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/DeletedBooking"
+                }
+              }
+            },
+            "description" : "Бронь удалена. В теле — id удалённого бронирования."
+          },
+          "401" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "unauthenticated",
+                  "message" : "Нужна авторизация"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Пользователя установить не удалось: заголовок Authorization отсутствует,\nсхема не Bearer, JWT повреждён или срок токена истёк.\n"
+          },
+          "403" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "forbidden",
+                  "message" : "Удалять это бронирование нельзя"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Пользователь известен, но удалять это бронирование ему нельзя."
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "booking_not_found",
+                  "message" : "Бронирование не найдено"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Бронирования с таким id нет."
+          }
+        },
+        "summary" : "Удалить бронирование",
+        "tags" : [ "bookings" ]
+      },
+      "patch" : {
+        "description" : "Меняет только интервал брони. Новые начало и конец — в теле:\nэто частичное изменение ресурса, остальные поля остаются прежними.\nПересечение с самой этой бронью конфликтом не считается.\n`403`, если бронь есть, но этому пользователю её переносить нельзя.\n",
+        "operationId" : "rescheduleBooking",
+        "parameters" : [ {
+          "description" : "Идентификатор бронирования.",
+          "explode" : false,
+          "in" : "path",
+          "name" : "bookingId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "style" : "simple"
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "example" : {
+                "startsAt" : "2026-11-10T14:00:00+05:00",
+                "endsAt" : "2026-11-10T15:00:00+05:00"
+              },
+              "schema" : {
+                "$ref" : "#/components/schemas/RescheduleBooking"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "id" : "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                  "roomId" : "6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90",
+                  "startsAt" : "2026-11-10T14:00:00+05:00",
+                  "endsAt" : "2026-11-10T15:00:00+05:00",
+                  "title" : "Планёрка команды",
+                  "comment" : "Нужен переходник HDMI",
+                  "bookedBy" : "Анна Смирнова"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Booking"
+                }
+              }
+            },
+            "description" : "Бронь перенесена. В теле — её актуальное публичное представление."
+          },
+          "400" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "invalid_interval",
+                  "message" : "Время окончания должно быть позже начала и попадать в часы работы комнаты"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Новый интервал некорректный: конец не позже начала, длительность больше 12 часов\nили интервал вне часов работы комнаты.\n"
+          },
+          "401" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "unauthenticated",
+                  "message" : "Нужна авторизация"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Пользователя установить не удалось: заголовок Authorization отсутствует,\nсхема не Bearer, JWT повреждён или срок токена истёк.\n"
+          },
+          "403" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "forbidden",
+                  "message" : "Переносить это бронирование нельзя"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Пользователь известен, но переносить это бронирование ему нельзя."
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "booking_not_found",
+                  "message" : "Бронирование не найдено"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Бронирования с таким id нет."
+          },
+          "409" : {
+            "content" : {
+              "application/json" : {
+                "example" : {
+                  "code" : "booking_conflict",
+                  "message" : "Это время уже занято"
+                },
+                "schema" : {
+                  "$ref" : "#/components/schemas/Error"
+                }
+              }
+            },
+            "description" : "Новый интервал пересекается с другой бронью этой переговорки."
+          }
+        },
+        "summary" : "Перенести бронирование",
+        "tags" : [ "bookings" ]
+      }
+    }
+  },
+  "components" : {
+    "parameters" : {
+      "roomId" : {
+        "description" : "Идентификатор переговорки.",
+        "explode" : false,
+        "in" : "path",
+        "name" : "roomId",
+        "required" : true,
+        "schema" : {
+          "format" : "uuid",
+          "type" : "string"
+        },
+        "style" : "simple"
+      },
+      "bookingId" : {
+        "description" : "Идентификатор бронирования.",
+        "explode" : false,
+        "in" : "path",
+        "name" : "bookingId",
+        "required" : true,
+        "schema" : {
+          "format" : "uuid",
+          "type" : "string"
+        },
+        "style" : "simple"
+      }
+    },
+    "responses" : {
+      "Unauthorized" : {
+        "content" : {
+          "application/json" : {
+            "example" : {
+              "code" : "unauthenticated",
+              "message" : "Нужна авторизация"
+            },
+            "schema" : {
+              "$ref" : "#/components/schemas/Error"
+            }
+          }
+        },
+        "description" : "Пользователя установить не удалось: заголовок Authorization отсутствует,\nсхема не Bearer, JWT повреждён или срок токена истёк.\n"
+      }
+    },
+    "schemas" : {
+      "Room" : {
+        "additionalProperties" : false,
+        "description" : "Публичная карточка переговорки для списка.",
+        "example" : {
+          "id" : "6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90",
+          "name" : "Орбита",
+          "floor" : 5,
+          "capacity" : 8,
+          "amenities" : {
+            "tv" : true,
+            "whiteboard" : true,
+            "videoConference" : true
+          }
+        },
+        "properties" : {
+          "id" : {
+            "description" : "Идентификатор переговорки.",
+            "example" : "6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "name" : {
+            "description" : "Имя переговорки.",
+            "example" : "Орбита",
+            "type" : "string"
+          },
+          "floor" : {
+            "description" : "Этаж.",
+            "example" : 5,
+            "type" : "integer"
+          },
+          "capacity" : {
+            "description" : "Максимальная вместимость, человек.",
+            "example" : 8,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "amenities" : {
+            "$ref" : "#/components/schemas/Amenities"
+          }
+        },
+        "required" : [ "amenities", "capacity", "floor", "id", "name" ],
+        "type" : "object"
+      },
+      "RoomDetails" : {
+        "allOf" : [ {
+          "$ref" : "#/components/schemas/Room"
+        }, {
+          "additionalProperties" : false,
+          "description" : "То, чего нет в списке и что нужно, чтобы дойти до комнаты и понять, когда она работает.",
+          "properties" : {
+            "description" : {
+              "description" : "Короткое описание комнаты.",
+              "example" : "Угловая комната с окнами во двор и большим столом.",
+              "type" : "string"
+            },
+            "directions" : {
+              "description" : "Как пройти.",
+              "example" : "5 этаж, левое крыло, третья дверь за ресепшен.",
+              "type" : "string"
+            },
+            "photos" : {
+              "description" : "Фотографии. Может быть пустым.",
+              "items" : {
+                "$ref" : "#/components/schemas/Photo"
+              },
+              "type" : "array"
+            },
+            "workingHours" : {
+              "description" : "Часы работы по местному времени комнаты. Дни без записи — выходные.",
+              "items" : {
+                "$ref" : "#/components/schemas/WorkingHours"
+              },
+              "type" : "array"
+            },
+            "timeZone" : {
+              "description" : "Часовой пояс комнаты, имя из базы IANA. По нему читаются часы работы.",
+              "example" : "Europe/Yekaterinburg",
+              "type" : "string"
+            }
+          },
+          "required" : [ "description", "directions", "photos", "timeZone", "workingHours" ],
+          "type" : "object"
+        } ],
+        "example" : {
+          "id" : "6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90",
+          "name" : "Орбита",
+          "floor" : 5,
+          "capacity" : 8,
+          "amenities" : {
+            "tv" : true,
+            "whiteboard" : true,
+            "videoConference" : true
+          },
+          "description" : "Угловая комната с окнами во двор и большим столом.",
+          "directions" : "5 этаж, левое крыло, третья дверь за ресепшен.",
+          "photos" : [ {
+            "url" : "https://cdn.example.com/rooms/orbita.jpg",
+            "caption" : "Общий вид"
+          }, {
+            "url" : "https://cdn.example.com/rooms/orbita.jpg",
+            "caption" : "Общий вид"
+          } ],
+          "workingHours" : [ {
+            "weekday" : "monday",
+            "opensAt" : "09:00",
+            "closesAt" : "19:00"
+          }, {
+            "weekday" : "monday",
+            "opensAt" : "09:00",
+            "closesAt" : "19:00"
+          } ],
+          "timeZone" : "Europe/Yekaterinburg"
+        }
+      },
+      "Amenities" : {
+        "additionalProperties" : false,
+        "description" : "Удобства. Наружу только факт наличия, без инвентарных номеров техники.",
+        "example" : {
+          "tv" : true,
+          "whiteboard" : true,
+          "videoConference" : true
+        },
+        "properties" : {
+          "tv" : {
+            "description" : "Есть телевизор или панель.",
+            "example" : true,
+            "type" : "boolean"
+          },
+          "whiteboard" : {
+            "description" : "Есть маркерная доска.",
+            "example" : true,
+            "type" : "boolean"
+          },
+          "videoConference" : {
+            "description" : "Можно проводить видеоконференцию.",
+            "example" : true,
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "tv", "videoConference", "whiteboard" ],
+        "type" : "object"
+      },
+      "Photo" : {
+        "additionalProperties" : false,
+        "description" : "Ссылка на фото. Внутренний ключ хранилища не отдаётся.",
+        "example" : {
+          "url" : "https://cdn.example.com/rooms/orbita.jpg",
+          "caption" : "Общий вид"
+        },
+        "properties" : {
+          "url" : {
+            "description" : "Адрес изображения.",
+            "example" : "https://cdn.example.com/rooms/orbita.jpg",
+            "format" : "uri",
+            "type" : "string"
+          },
+          "caption" : {
+            "description" : "Подпись. Можно не передавать.",
+            "example" : "Общий вид",
+            "type" : "string"
+          }
+        },
+        "required" : [ "url" ],
+        "type" : "object"
+      },
+      "WorkingHours" : {
+        "additionalProperties" : false,
+        "description" : "Часы работы в один день недели, местное время комнаты.",
+        "example" : {
+          "weekday" : "monday",
+          "opensAt" : "09:00",
+          "closesAt" : "19:00"
+        },
+        "properties" : {
+          "weekday" : {
+            "description" : "День недели.",
+            "enum" : [ "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday" ],
+            "example" : "monday",
+            "type" : "string"
+          },
+          "opensAt" : {
+            "description" : "Время открытия, ЧЧ:ММ.",
+            "example" : "09:00",
+            "pattern" : "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "type" : "string"
+          },
+          "closesAt" : {
+            "description" : "Время закрытия, ЧЧ:ММ. Позже `opensAt`.",
+            "example" : "19:00",
+            "pattern" : "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "type" : "string"
+          }
+        },
+        "required" : [ "closesAt", "opensAt", "weekday" ],
+        "type" : "object"
+      },
+      "RoomCalendar" : {
+        "additionalProperties" : false,
+        "description" : "Окно расписания одной переговорки и брони внутри него.",
+        "example" : {
+          "roomId" : "046b6c7f-0b8a-43b9-b35d-6489e6daee91",
+          "from" : "2000-01-23T04:56:07.000+00:00",
+          "to" : "2000-01-23T04:56:07.000+00:00",
+          "bookings" : [ {
+            "id" : "046b6c7f-0b8a-43b9-b35d-6489e6daee91",
+            "startsAt" : "2000-01-23T04:56:07.000+00:00",
+            "endsAt" : "2000-01-23T04:56:07.000+00:00",
+            "title" : "Планёрка команды",
+            "bookedBy" : "Анна Смирнова"
+          }, {
+            "id" : "046b6c7f-0b8a-43b9-b35d-6489e6daee91",
+            "startsAt" : "2000-01-23T04:56:07.000+00:00",
+            "endsAt" : "2000-01-23T04:56:07.000+00:00",
+            "title" : "Планёрка команды",
+            "bookedBy" : "Анна Смирнова"
+          } ]
+        },
+        "properties" : {
+          "roomId" : {
+            "description" : "Идентификатор переговорки.",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "from" : {
+            "description" : "Начало запрошенного окна, включительно.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "to" : {
+            "description" : "Конец запрошенного окна, исключительно.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "bookings" : {
+            "description" : "Брони, пересекающие окно. Порядок — по `startsAt`.",
+            "items" : {
+              "$ref" : "#/components/schemas/CalendarEntry"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "bookings", "from", "roomId", "to" ],
+        "type" : "object"
+      },
+      "CalendarEntry" : {
+        "additionalProperties" : false,
+        "description" : "Бронь в календаре. Это не полная бронь: комментария здесь нет.\n`id` нужен, чтобы перенести или удалить бронь.\n",
+        "example" : {
+          "id" : "046b6c7f-0b8a-43b9-b35d-6489e6daee91",
+          "startsAt" : "2000-01-23T04:56:07.000+00:00",
+          "endsAt" : "2000-01-23T04:56:07.000+00:00",
+          "title" : "Планёрка команды",
+          "bookedBy" : "Анна Смирнова"
+        },
+        "properties" : {
+          "id" : {
+            "description" : "Идентификатор бронирования.",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "startsAt" : {
+            "description" : "Начало брони, включительно.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "endsAt" : {
+            "description" : "Конец брони, исключительно.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "title" : {
+            "description" : "Имя бронирования.",
+            "example" : "Планёрка команды",
+            "type" : "string"
+          },
+          "bookedBy" : {
+            "description" : "Отображаемое имя того, кто забронировал.",
+            "example" : "Анна Смирнова",
+            "type" : "string"
+          }
+        },
+        "required" : [ "bookedBy", "endsAt", "id", "startsAt", "title" ],
+        "type" : "object"
+      },
+      "CreateBooking" : {
+        "additionalProperties" : false,
+        "description" : "Данные новой брони. Пользователь в тело не входит, он берётся из JWT.",
+        "example" : {
+          "startsAt" : "2026-11-10T10:00:00+05:00",
+          "endsAt" : "2026-11-10T11:30:00+05:00",
+          "title" : "Планёрка команды",
+          "comment" : "Нужен переходник HDMI"
+        },
+        "properties" : {
+          "startsAt" : {
+            "description" : "Начало, включительно.",
+            "example" : "2026-11-10T10:00:00+05:00",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "endsAt" : {
+            "description" : "Конец, исключительно. Позже `startsAt`, длительность не больше 12 часов.",
+            "example" : "2026-11-10T11:30:00+05:00",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "title" : {
+            "description" : "Имя бронирования.",
+            "example" : "Планёрка команды",
+            "maxLength" : 200,
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "comment" : {
+            "description" : "Комментарий к брони. Можно не передавать.",
+            "example" : "Нужен переходник HDMI",
+            "maxLength" : 2000,
+            "nullable" : true,
+            "type" : "string"
+          }
+        },
+        "required" : [ "endsAt", "startsAt", "title" ],
+        "type" : "object"
+      },
+      "RescheduleBooking" : {
+        "additionalProperties" : false,
+        "description" : "Новый интервал существующей брони. Имя, комментарий и комната этим запросом не меняются.",
+        "example" : {
+          "startsAt" : "2026-11-10T14:00:00+05:00",
+          "endsAt" : "2026-11-10T15:00:00+05:00"
+        },
+        "properties" : {
+          "startsAt" : {
+            "description" : "Новое начало, включительно.",
+            "example" : "2026-11-10T14:00:00+05:00",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "endsAt" : {
+            "description" : "Новый конец, исключительно.",
+            "example" : "2026-11-10T15:00:00+05:00",
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "endsAt", "startsAt" ],
+        "type" : "object"
+      },
+      "Booking" : {
+        "additionalProperties" : false,
+        "description" : "Публичное представление брони. Так ресурс выглядит после создания и после переноса.",
+        "example" : {
+          "id" : "046b6c7f-0b8a-43b9-b35d-6489e6daee91",
+          "roomId" : "046b6c7f-0b8a-43b9-b35d-6489e6daee91",
+          "startsAt" : "2000-01-23T04:56:07.000+00:00",
+          "endsAt" : "2000-01-23T04:56:07.000+00:00",
+          "title" : "Планёрка команды",
+          "comment" : "Нужен переходник HDMI",
+          "bookedBy" : "Анна Смирнова"
+        },
+        "properties" : {
+          "id" : {
+            "description" : "Идентификатор бронирования.",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "roomId" : {
+            "description" : "Идентификатор переговорки.",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "startsAt" : {
+            "description" : "Начало, включительно.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "endsAt" : {
+            "description" : "Конец, исключительно.",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "title" : {
+            "description" : "Имя бронирования.",
+            "example" : "Планёрка команды",
+            "type" : "string"
+          },
+          "comment" : {
+            "description" : "Комментарий. `null`, если его не оставляли.",
+            "example" : "Нужен переходник HDMI",
+            "nullable" : true,
+            "type" : "string"
+          },
+          "bookedBy" : {
+            "description" : "Отображаемое имя автора брони. Заполняет сервер из JWT.",
+            "example" : "Анна Смирнова",
+            "readOnly" : true,
+            "type" : "string"
+          }
+        },
+        "required" : [ "bookedBy", "comment", "endsAt", "id", "roomId", "startsAt", "title" ],
+        "type" : "object"
+      },
+      "DeletedBooking" : {
+        "additionalProperties" : false,
+        "description" : "Подтверждение, что бронь удалена.",
+        "example" : {
+          "id" : "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+        },
+        "properties" : {
+          "id" : {
+            "description" : "Идентификатор удалённого бронирования.",
+            "example" : "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "required" : [ "id" ],
+        "type" : "object"
+      },
+      "Error" : {
+        "additionalProperties" : false,
+        "description" : "Ошибка. `code` — машиночитаемый код, на него опирается клиент.\n`message` — человекочитаемый текст той же ошибки.\n",
+        "example" : {
+          "code" : "room_not_found",
+          "message" : "Переговорка не найдена"
+        },
+        "properties" : {
+          "code" : {
+            "description" : "Машиночитаемый код:\n`unauthenticated` — не удалось узнать пользователя;\n`forbidden` — пользователь известен, но действие запрещено;\n`invalid_floor`, `invalid_capacity` — плохой фильтр списка;\n`invalid_interval` — плохое окно или интервал брони;\n`invalid_booking` — некорректное тело брони;\n`room_not_found`, `booking_not_found` — нет такого ресурса;\n`booking_conflict` — интервал пересекается с другой бронью.\n",
+            "enum" : [ "unauthenticated", "forbidden", "invalid_floor", "invalid_capacity", "invalid_interval", "invalid_booking", "room_not_found", "booking_not_found", "booking_conflict" ],
+            "example" : "room_not_found",
+            "type" : "string"
+          },
+          "message" : {
+            "description" : "Человекочитаемое описание ошибки.",
+            "example" : "Переговорка не найдена",
+            "type" : "string"
+          }
+        },
+        "required" : [ "code", "message" ],
+        "type" : "object"
+      }
+    },
+    "securitySchemes" : {
+      "bearerAuth" : {
+        "bearerFormat" : "JWT",
+        "description" : "Заголовок `Authorization: Bearer <jwt>`.\nПо токену сервер определяет пользователя. Клиент не присылает его отдельно.\n",
+        "scheme" : "bearer",
+        "type" : "http"
+      }
+    }
+  }
+}
