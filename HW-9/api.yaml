@@ -1,0 +1,756 @@
+openapi: 3.0.3
+info:
+  title: Бронирование переговорок
+  version: 1.0.0
+  description: |
+    API бронирования переговорок в офисе.
+
+    Кто вызывает метод, сервер узнаёт из JWT. Имя и идентификатор пользователя
+    в параметрах и в теле не передаются.
+
+    401 — пользователя установить не удалось (нет токена, токен повреждён или просрочен).
+    403 — пользователь известен, но это действие ему запрещено.
+
+    Наружу выходят только публичные DTO из `components.schemas`.
+    Список комнаты, карточка комнаты, строка календаря и бронь — разные схемы.
+
+    Бронь занимает полуинтервал `[startsAt, endsAt)`: стык встык конфликтом не считается.
+servers:
+  - url: /api/v1
+tags:
+  - name: rooms
+    description: Переговорки и их календарь
+  - name: bookings
+    description: Бронирования
+paths:
+  /rooms:
+    get:
+      tags: [rooms]
+      operationId: listRooms
+      summary: Получить список переговорок
+      description: |
+        Возвращает публичные карточки комнат. Без фильтров — все комнаты.
+        Пустой результат — это `200` и пустой массив, а не `404`.
+      parameters:
+        - name: floor
+          in: query
+          required: false
+          description: Точный этаж. Подвал допустим.
+          schema:
+            type: integer
+            minimum: -2
+            maximum: 100
+            example: 5
+        - name: capacity
+          in: query
+          required: false
+          description: |
+            Минимально нужная вместимость. В ответ попадут комнаты,
+            у которых `capacity` не меньше этого значения.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            example: 6
+      responses:
+        "200":
+          description: Список переговорок.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Room"
+              example:
+                - id: 6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90
+                  name: Орбита
+                  floor: 5
+                  capacity: 8
+                  amenities:
+                    tv: true
+                    whiteboard: true
+                    videoConference: true
+                - id: 1c2d3e4f-5a6b-4789-8abc-def012345678
+                  name: Тихая
+                  floor: 5
+                  capacity: 4
+                  amenities:
+                    tv: false
+                    whiteboard: true
+                    videoConference: false
+        "400":
+          description: |
+            Фильтр некорректный: `floor` или `capacity` не целое число
+            либо выходит за допустимый диапазон. У `capacity` ещё и минимум 1.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                floor:
+                  summary: Плохой этаж
+                  value:
+                    code: invalid_floor
+                    message: Этаж должен быть целым числом от -2 до 100
+                capacity:
+                  summary: Плохая вместимость
+                  value:
+                    code: invalid_capacity
+                    message: Вместимость должна быть целым числом от 1 до 500
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /rooms/{roomId}:
+    get:
+      tags: [rooms]
+      operationId: getRoom
+      summary: Получить переговорку
+      description: Карточка одной комнаты. Поля списка здесь те же, плюс сведения, нужные чтобы дойти и выбрать время.
+      parameters:
+        - $ref: "#/components/parameters/roomId"
+      responses:
+        "200":
+          description: Карточка переговорки.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoomDetails"
+              example:
+                id: 6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90
+                name: Орбита
+                floor: 5
+                capacity: 8
+                amenities:
+                  tv: true
+                  whiteboard: true
+                  videoConference: true
+                description: Угловая комната с окнами во двор и большим столом.
+                directions: 5 этаж, левое крыло, третья дверь за ресепшен.
+                photos:
+                  - url: https://cdn.example.com/rooms/orbita.jpg
+                    caption: Общий вид
+                workingHours:
+                  - weekday: monday
+                    opensAt: "09:00"
+                    closesAt: "19:00"
+                timeZone: Europe/Yekaterinburg
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Переговорки с таким id нет.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: room_not_found
+                message: Переговорка не найдена
+
+  /rooms/{roomId}/calendar:
+    get:
+      tags: [rooms]
+      operationId: getRoomCalendar
+      summary: Получить календарь переговорки
+      description: |
+        Брони одной комнаты внутри запрошенного окна.
+        Окно включительно по `from` и исключительно по `to`.
+        Комментарии броней в календарь не входят.
+      parameters:
+        - $ref: "#/components/parameters/roomId"
+        - name: from
+          in: query
+          required: true
+          description: Начало окна просмотра, включительно.
+          schema:
+            type: string
+            format: date-time
+            example: "2026-11-10T00:00:00+05:00"
+        - name: to
+          in: query
+          required: true
+          description: Конец окна просмотра, исключительно. Должен быть позже `from`, окно не длиннее 90 суток.
+          schema:
+            type: string
+            format: date-time
+            example: "2026-11-17T00:00:00+05:00"
+      responses:
+        "200":
+          description: Окно календаря и брони внутри него. Броней может не быть.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoomCalendar"
+              example:
+                roomId: 6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90
+                from: "2026-11-10T00:00:00+05:00"
+                to: "2026-11-17T00:00:00+05:00"
+                bookings:
+                  - id: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+                    startsAt: "2026-11-10T10:00:00+05:00"
+                    endsAt: "2026-11-10T11:30:00+05:00"
+                    title: Планёрка команды
+                    bookedBy: Анна Смирнова
+        "400":
+          description: |
+            Окно задано неверно: нет `from` или `to`, это не дата-время,
+            `to` не позже `from`, либо окно длиннее 90 суток.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: invalid_interval
+                message: Конец окна должен быть позже начала, а само окно не длиннее 90 суток
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Переговорки с таким id нет.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: room_not_found
+                message: Переговорка не найдена
+
+  /rooms/{roomId}/bookings:
+    post:
+      tags: [bookings]
+      operationId: createBooking
+      summary: Забронировать переговорку
+      description: |
+        Создаёт бронь. Кто бронирует, берётся из JWT и возвращается в `bookedBy`.
+        `403`, если комната есть, но этому пользователю её бронировать нельзя.
+        Несуществующая комната — `404`, а не `403`.
+      parameters:
+        - $ref: "#/components/parameters/roomId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBooking"
+            example:
+              startsAt: "2026-11-10T10:00:00+05:00"
+              endsAt: "2026-11-10T11:30:00+05:00"
+              title: Планёрка команды
+              comment: Нужен переходник HDMI
+      responses:
+        "201":
+          description: Бронь создана. В теле — её id и публичное представление.
+          headers:
+            Location:
+              description: URL созданной брони, `/api/v1/bookings/{bookingId}`.
+              schema:
+                type: string
+                example: /api/v1/bookings/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+              example:
+                id: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+                roomId: 6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90
+                startsAt: "2026-11-10T10:00:00+05:00"
+                endsAt: "2026-11-10T11:30:00+05:00"
+                title: Планёрка команды
+                comment: Нужен переходник HDMI
+                bookedBy: Анна Смирнова
+        "400":
+          description: |
+            Тело некорректно: конец не позже начала, длительность больше 12 часов,
+            интервал вне часов работы комнаты, пустое имя или слишком длинный комментарий.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                interval:
+                  summary: Неверный интервал
+                  value:
+                    code: invalid_interval
+                    message: Время окончания должно быть позже начала и попадать в часы работы комнаты
+                title:
+                  summary: Пустое имя брони
+                  value:
+                    code: invalid_booking
+                    message: Укажите имя бронирования
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Пользователь известен, но бронировать эту переговорку ему нельзя.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: forbidden
+                message: Бронировать эту переговорку нельзя
+        "404":
+          description: Переговорки с таким id нет.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: room_not_found
+                message: Переговорка не найдена
+        "409":
+          description: Интервал пересекается с другой бронью этой переговорки. Стык встык допустим.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: booking_conflict
+                message: Это время уже занято
+
+  /bookings/{bookingId}:
+    patch:
+      tags: [bookings]
+      operationId: rescheduleBooking
+      summary: Перенести бронирование
+      description: |
+        Меняет только интервал брони. Новые начало и конец — в теле:
+        это частичное изменение ресурса, остальные поля остаются прежними.
+        Пересечение с самой этой бронью конфликтом не считается.
+        `403`, если бронь есть, но этому пользователю её переносить нельзя.
+      parameters:
+        - $ref: "#/components/parameters/bookingId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RescheduleBooking"
+            example:
+              startsAt: "2026-11-10T14:00:00+05:00"
+              endsAt: "2026-11-10T15:00:00+05:00"
+      responses:
+        "200":
+          description: Бронь перенесена. В теле — её актуальное публичное представление.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+              example:
+                id: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+                roomId: 6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90
+                startsAt: "2026-11-10T14:00:00+05:00"
+                endsAt: "2026-11-10T15:00:00+05:00"
+                title: Планёрка команды
+                comment: Нужен переходник HDMI
+                bookedBy: Анна Смирнова
+        "400":
+          description: |
+            Новый интервал некорректный: конец не позже начала, длительность больше 12 часов
+            или интервал вне часов работы комнаты.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: invalid_interval
+                message: Время окончания должно быть позже начала и попадать в часы работы комнаты
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Пользователь известен, но переносить это бронирование ему нельзя.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: forbidden
+                message: Переносить это бронирование нельзя
+        "404":
+          description: Бронирования с таким id нет.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: booking_not_found
+                message: Бронирование не найдено
+        "409":
+          description: Новый интервал пересекается с другой бронью этой переговорки.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: booking_conflict
+                message: Это время уже занято
+    delete:
+      tags: [bookings]
+      operationId: deleteBooking
+      summary: Удалить бронирование
+      description: |
+        Удаляет бронь. Повторный запрос с тем же id вернёт `404`.
+        `403`, если бронь есть, но этому пользователю её удалять нельзя.
+      parameters:
+        - $ref: "#/components/parameters/bookingId"
+      responses:
+        "200":
+          description: Бронь удалена. В теле — id удалённого бронирования.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedBooking"
+              example:
+                id: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Пользователь известен, но удалять это бронирование ему нельзя.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: forbidden
+                message: Удалять это бронирование нельзя
+        "404":
+          description: Бронирования с таким id нет.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: booking_not_found
+                message: Бронирование не найдено
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Заголовок `Authorization: Bearer <jwt>`.
+        По токену сервер определяет пользователя. Клиент не присылает его отдельно.
+  parameters:
+    roomId:
+      name: roomId
+      in: path
+      required: true
+      description: Идентификатор переговорки.
+      schema:
+        type: string
+        format: uuid
+    bookingId:
+      name: bookingId
+      in: path
+      required: true
+      description: Идентификатор бронирования.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Unauthorized:
+      description: |
+        Пользователя установить не удалось: заголовок Authorization отсутствует,
+        схема не Bearer, JWT повреждён или срок токена истёк.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: unauthenticated
+            message: Нужна авторизация
+  schemas:
+    Room:
+      type: object
+      additionalProperties: false
+      description: Публичная карточка переговорки для списка.
+      required: [id, name, floor, capacity, amenities]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Идентификатор переговорки.
+          example: 6b1f3c2a-7e4d-4a1b-9c8e-2f5d6a7b8c90
+        name:
+          type: string
+          description: Имя переговорки.
+          example: Орбита
+        floor:
+          type: integer
+          description: Этаж.
+          example: 5
+        capacity:
+          type: integer
+          minimum: 1
+          description: Максимальная вместимость, человек.
+          example: 8
+        amenities:
+          $ref: "#/components/schemas/Amenities"
+    RoomDetails:
+      allOf:
+        - $ref: "#/components/schemas/Room"
+        - type: object
+          additionalProperties: false
+          description: То, чего нет в списке и что нужно, чтобы дойти до комнаты и понять, когда она работает.
+          required: [description, directions, photos, workingHours, timeZone]
+          properties:
+            description:
+              type: string
+              description: Короткое описание комнаты.
+              example: Угловая комната с окнами во двор и большим столом.
+            directions:
+              type: string
+              description: Как пройти.
+              example: 5 этаж, левое крыло, третья дверь за ресепшен.
+            photos:
+              type: array
+              description: Фотографии. Может быть пустым.
+              items:
+                $ref: "#/components/schemas/Photo"
+            workingHours:
+              type: array
+              description: Часы работы по местному времени комнаты. Дни без записи — выходные.
+              items:
+                $ref: "#/components/schemas/WorkingHours"
+            timeZone:
+              type: string
+              description: Часовой пояс комнаты, имя из базы IANA. По нему читаются часы работы.
+              example: Europe/Yekaterinburg
+    Amenities:
+      type: object
+      additionalProperties: false
+      description: Удобства. Наружу только факт наличия, без инвентарных номеров техники.
+      required: [tv, whiteboard, videoConference]
+      properties:
+        tv:
+          type: boolean
+          description: Есть телевизор или панель.
+          example: true
+        whiteboard:
+          type: boolean
+          description: Есть маркерная доска.
+          example: true
+        videoConference:
+          type: boolean
+          description: Можно проводить видеоконференцию.
+          example: true
+    Photo:
+      type: object
+      additionalProperties: false
+      description: Ссылка на фото. Внутренний ключ хранилища не отдаётся.
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Адрес изображения.
+          example: https://cdn.example.com/rooms/orbita.jpg
+        caption:
+          type: string
+          description: Подпись. Можно не передавать.
+          example: Общий вид
+    WorkingHours:
+      type: object
+      additionalProperties: false
+      description: Часы работы в один день недели, местное время комнаты.
+      required: [weekday, opensAt, closesAt]
+      properties:
+        weekday:
+          type: string
+          description: День недели.
+          enum:
+            - monday
+            - tuesday
+            - wednesday
+            - thursday
+            - friday
+            - saturday
+            - sunday
+          example: monday
+        opensAt:
+          type: string
+          description: Время открытия, ЧЧ:ММ.
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          example: "09:00"
+        closesAt:
+          type: string
+          description: Время закрытия, ЧЧ:ММ. Позже `opensAt`.
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          example: "19:00"
+    RoomCalendar:
+      type: object
+      additionalProperties: false
+      description: Окно расписания одной переговорки и брони внутри него.
+      required: [roomId, from, to, bookings]
+      properties:
+        roomId:
+          type: string
+          format: uuid
+          description: Идентификатор переговорки.
+        from:
+          type: string
+          format: date-time
+          description: Начало запрошенного окна, включительно.
+        to:
+          type: string
+          format: date-time
+          description: Конец запрошенного окна, исключительно.
+        bookings:
+          type: array
+          description: Брони, пересекающие окно. Порядок — по `startsAt`.
+          items:
+            $ref: "#/components/schemas/CalendarEntry"
+    CalendarEntry:
+      type: object
+      additionalProperties: false
+      description: |
+        Бронь в календаре. Это не полная бронь: комментария здесь нет.
+        `id` нужен, чтобы перенести или удалить бронь.
+      required: [id, startsAt, endsAt, title, bookedBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Идентификатор бронирования.
+        startsAt:
+          type: string
+          format: date-time
+          description: Начало брони, включительно.
+        endsAt:
+          type: string
+          format: date-time
+          description: Конец брони, исключительно.
+        title:
+          type: string
+          description: Имя бронирования.
+          example: Планёрка команды
+        bookedBy:
+          type: string
+          description: Отображаемое имя того, кто забронировал.
+          example: Анна Смирнова
+    CreateBooking:
+      type: object
+      additionalProperties: false
+      description: Данные новой брони. Пользователь в тело не входит, он берётся из JWT.
+      required: [startsAt, endsAt, title]
+      properties:
+        startsAt:
+          type: string
+          format: date-time
+          description: Начало, включительно.
+          example: "2026-11-10T10:00:00+05:00"
+        endsAt:
+          type: string
+          format: date-time
+          description: Конец, исключительно. Позже `startsAt`, длительность не больше 12 часов.
+          example: "2026-11-10T11:30:00+05:00"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Имя бронирования.
+          example: Планёрка команды
+        comment:
+          type: string
+          maxLength: 2000
+          nullable: true
+          description: Комментарий к брони. Можно не передавать.
+          example: Нужен переходник HDMI
+    RescheduleBooking:
+      type: object
+      additionalProperties: false
+      description: Новый интервал существующей брони. Имя, комментарий и комната этим запросом не меняются.
+      required: [startsAt, endsAt]
+      properties:
+        startsAt:
+          type: string
+          format: date-time
+          description: Новое начало, включительно.
+          example: "2026-11-10T14:00:00+05:00"
+        endsAt:
+          type: string
+          format: date-time
+          description: Новый конец, исключительно.
+          example: "2026-11-10T15:00:00+05:00"
+    Booking:
+      type: object
+      additionalProperties: false
+      description: Публичное представление брони. Так ресурс выглядит после создания и после переноса.
+      required: [id, roomId, startsAt, endsAt, title, comment, bookedBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Идентификатор бронирования.
+        roomId:
+          type: string
+          format: uuid
+          description: Идентификатор переговорки.
+        startsAt:
+          type: string
+          format: date-time
+          description: Начало, включительно.
+        endsAt:
+          type: string
+          format: date-time
+          description: Конец, исключительно.
+        title:
+          type: string
+          description: Имя бронирования.
+          example: Планёрка команды
+        comment:
+          type: string
+          nullable: true
+          description: Комментарий. `null`, если его не оставляли.
+          example: Нужен переходник HDMI
+        bookedBy:
+          type: string
+          description: Отображаемое имя автора брони. Заполняет сервер из JWT.
+          example: Анна Смирнова
+          readOnly: true
+    DeletedBooking:
+      type: object
+      additionalProperties: false
+      description: Подтверждение, что бронь удалена.
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Идентификатор удалённого бронирования.
+          example: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+    Error:
+      type: object
+      additionalProperties: false
+      description: |
+        Ошибка. `code` — машиночитаемый код, на него опирается клиент.
+        `message` — человекочитаемый текст той же ошибки.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: |
+            Машиночитаемый код:
+            `unauthenticated` — не удалось узнать пользователя;
+            `forbidden` — пользователь известен, но действие запрещено;
+            `invalid_floor`, `invalid_capacity` — плохой фильтр списка;
+            `invalid_interval` — плохое окно или интервал брони;
+            `invalid_booking` — некорректное тело брони;
+            `room_not_found`, `booking_not_found` — нет такого ресурса;
+            `booking_conflict` — интервал пересекается с другой бронью.
+          enum:
+            - unauthenticated
+            - forbidden
+            - invalid_floor
+            - invalid_capacity
+            - invalid_interval
+            - invalid_booking
+            - room_not_found
+            - booking_not_found
+            - booking_conflict
+          example: room_not_found
+        message:
+          type: string
+          description: Человекочитаемое описание ошибки.
+          example: Переговорка не найдена
+security:
+  - bearerAuth: []
