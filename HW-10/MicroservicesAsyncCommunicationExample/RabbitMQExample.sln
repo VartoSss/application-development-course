@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "JobApi", "JobApi\JobApi.csproj", "{FFAF0641-5264-49D2-92A5-D765C42009F0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QueueContracts", "QueueContracts\QueueContracts.csproj", "{2C91FBFD-F927-4D64-B837-9F1ABE557ADF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BookingWorker", "BookingWorker\BookingWorker.csproj", "{3787E279-56BA-4DCB-A154-49EBCE9B78A7}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FFAF0641-5264-49D2-92A5-D765C42009F0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FFAF0641-5264-49D2-92A5-D765C42009F0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FFAF0641-5264-49D2-92A5-D765C42009F0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FFAF0641-5264-49D2-92A5-D765C42009F0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2C91FBFD-F927-4D64-B837-9F1ABE557ADF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2C91FBFD-F927-4D64-B837-9F1ABE557ADF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2C91FBFD-F927-4D64-B837-9F1ABE557ADF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2C91FBFD-F927-4D64-B837-9F1ABE557ADF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3787E279-56BA-4DCB-A154-49EBCE9B78A7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3787E279-56BA-4DCB-A154-49EBCE9B78A7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3787E279-56BA-4DCB-A154-49EBCE9B78A7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3787E279-56BA-4DCB-A154-49EBCE9B78A7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,45 @@
+name: hw10
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: hw10-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  job-api:
+    build:
+      context: .
+      dockerfile: JobApi/Dockerfile
+    container_name: hw10-job-api
+    ports:
+      - "8080:8080"
+    environment:
+      RabbitMQ__Host: rabbitmq
+      RabbitMQ__Username: guest
+      RabbitMQ__Password: guest
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  booking-worker:
+    build:
+      context: .
+      dockerfile: BookingWorker/Dockerfile
+    container_name: hw10-worker
+    environment:
+      RabbitMQ__Host: rabbitmq
+      RabbitMQ__Username: guest
+      RabbitMQ__Password: guest
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
